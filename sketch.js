@@ -1,6 +1,7 @@
 let particles = [];
 let north;
-let numParticles = 3500;
+let gaze;
+let numParticles = 3200;
 
 function setup() {
   createCanvas(windowWidth, windowHeight);
@@ -16,26 +17,30 @@ function setup() {
 }
 
 function draw() {
-  // scia visiva
-  background(2, 4, 10, 25);
+  background(2, 4, 10, 28);
 
-  // distanza mouse dal Nord magnetico
-  let mouse = createVector(mouseX, mouseY);
-  let distance = dist(mouse.x, mouse.y, north.x, north.y);
+  gaze = createVector(mouseX, mouseY);
 
-  // più il mouse è vicino al Nord, più il campo è ordinato
-  let order = map(distance, 0, width * 0.8, 1, 0);
-  order = constrain(order, 0, 1);
+  let birdDir = p5.Vector.sub(gaze, createVector(width / 2, height / 2));
+  let magneticDir = p5.Vector.sub(north, createVector(width / 2, height / 2));
 
-  drawMagneticNorth(order);
-  drawCursorGuide(order);
+  let angle = abs(birdDir.angleBetween(magneticDir));
+
+  // Bussola a inclinazione:
+  // l'uccello percepisce l'asse del campo, non una freccia Nord/Sud classica
+  let magneticSignal = abs(cos(angle));
+  magneticSignal = constrain(magneticSignal, 0, 1);
+
+  drawFieldAxis();
+  drawBirdVisionOverlay(magneticSignal, angle);
 
   for (let p of particles) {
-    p.update(order);
-    p.show(order);
+    p.update(magneticSignal);
+    p.show(magneticSignal);
   }
 
-  drawText(order);
+  drawCursorBird(magneticSignal);
+  drawText(magneticSignal);
 }
 
 class Particle {
@@ -43,29 +48,26 @@ class Particle {
     this.pos = createVector(random(width), random(height));
     this.vel = p5.Vector.random2D();
     this.acc = createVector(0, 0);
-    this.maxSpeed = random(1.2, 3.2);
-    this.size = random(0.7, 2);
+    this.maxSpeed = random(1.1, 2.8);
+    this.size = random(0.6, 1.8);
   }
 
-  update(order) {
-    let magneticForce = p5.Vector.sub(north, this.pos);
-    let distance = magneticForce.mag();
+  update(signal) {
+    let center = createVector(width / 2, height / 2);
 
-    magneticForce.normalize();
+    // direzione dell'asse magnetico terrestre
+    let field = p5.Vector.sub(north, center).normalize();
 
-    // forza ordinata verso il Nord
-    magneticForce.mult(0.08 * order);
+    // movimento lungo l'asse magnetico, non verso un punto
+    let orderedForce = field.copy();
+    orderedForce.mult(0.07 * signal);
 
-    // caos generato con Perlin noise
-    let noiseScale = 0.002;
-    let angle = noise(this.pos.x * noiseScale, this.pos.y * noiseScale, frameCount * 0.003);
-    angle = map(angle, 0, 1, 0, TWO_PI * 4);
+    // rumore biologico/percettivo
+    let n = noise(this.pos.x * 0.002, this.pos.y * 0.002, frameCount * 0.004);
+    let chaoticForce = p5.Vector.fromAngle(n * TWO_PI * 4);
+    chaoticForce.mult(0.12 * (1 - signal));
 
-    let chaoticForce = p5.Vector.fromAngle(angle);
-    chaoticForce.mult(0.12 * (1 - order));
-
-    // campo misto: caos + orientamento magnetico
-    this.acc.add(magneticForce);
+    this.acc.add(orderedForce);
     this.acc.add(chaoticForce);
 
     this.vel.add(this.acc);
@@ -73,92 +75,117 @@ class Particle {
     this.pos.add(this.vel);
     this.acc.mult(0);
 
-    // riciclo particelle ai bordi
     if (this.pos.x < 0) this.pos.x = width;
     if (this.pos.x > width) this.pos.x = 0;
     if (this.pos.y < 0) this.pos.y = height;
     if (this.pos.y > height) this.pos.y = 0;
   }
 
-  show(order) {
-    let c1 = color(120, 60, 255, 90);
-    let c2 = color(0, 255, 230, 150);
-    let c = lerpColor(c1, c2, order);
+  show(signal) {
+    let violet = color(120, 60, 255, 80);
+    let cyan = color(0, 255, 230, 155);
+    let c = lerpColor(violet, cyan, signal);
 
     stroke(c);
     strokeWeight(this.size);
-
     point(this.pos.x, this.pos.y);
   }
 }
 
-function drawMagneticNorth(order) {
-  push();
-  translate(north.x, north.y);
+function drawFieldAxis() {
+  let center = createVector(width / 2, height / 2);
+
+  stroke(0, 255, 230, 90);
+  strokeWeight(1.5);
+
+  drawingContext.setLineDash([10, 10]);
+  line(center.x, center.y, north.x, north.y);
+  line(center.x, center.y, width - north.x, height - north.y);
+  drawingContext.setLineDash([]);
 
   noStroke();
+  fill(0, 255, 230, 180);
+  circle(north.x, north.y, 10);
 
-  let glow = map(order, 0, 1, 40, 180);
+  fill(255, 170);
+  textSize(13);
+  text("ASSE DEL CAMPO MAGNETICO", north.x + 18, north.y + 4);
+}
 
-  fill(0, 255, 230, glow);
-  circle(0, 0, 40 + sin(frameCount * 0.05) * 8);
+function drawBirdVisionOverlay(signal, angle) {
+  push();
 
-  fill(255);
-  circle(0, 0, 6);
+  translate(width / 2, height / 2);
 
-  stroke(0, 255, 230, 120);
-  strokeWeight(1);
+  // trama visiva: più il campo è allineato allo sguardo,
+  // più appare una modulazione luminosa nel campo visivo
+  let bands = 34;
+  let radius = min(width, height) * 0.42;
 
-  for (let i = 0; i < 40; i++) {
-    let a = map(i, 0, 40, 0, TWO_PI);
-    let len = map(order, 0, 1, 40, 150);
-    line(0, 0, cos(a) * len, sin(a) * len);
+  noFill();
+
+  for (let i = 0; i < bands; i++) {
+    let r = map(i, 0, bands, 30, radius);
+    let alpha = map(sin(i * 0.7 + frameCount * 0.03), -1, 1, 15, 90);
+    alpha *= signal;
+
+    stroke(0, 255, 230, alpha);
+    strokeWeight(1);
+
+    ellipse(0, 0, r * 1.6, r * 0.75);
   }
 
   pop();
 }
 
-function drawCursorGuide(order) {
-  stroke(255, 255, 255, 100);
+function drawCursorBird(signal) {
+  let center = createVector(width / 2, height / 2);
+
+  stroke(255, 180);
   strokeWeight(1);
-  drawingContext.setLineDash([8, 8]);
-  line(mouseX, mouseY, north.x, north.y);
-  drawingContext.setLineDash([]);
+  line(center.x, center.y, mouseX, mouseY);
 
   noFill();
   stroke(255);
-  circle(mouseX, mouseY, 22);
+  circle(mouseX, mouseY, 24);
 
   noStroke();
-  fill(255, 180);
+  fill(255);
   textSize(12);
-  text("TUO CURSORE", mouseX + 18, mouseY - 18);
+  text("DIREZIONE DELLO SGUARDO", mouseX + 18, mouseY - 15);
 }
 
-function drawText(order) {
+function drawText(signal) {
   noStroke();
+
   fill(255);
   textSize(26);
-  text("MAGNETORICEZIONE", 30, 45);
+  text("MAGNETORICEZIONE AVIARIA", 30, 45);
 
+  fill(185);
   textSize(15);
-  fill(180);
-  text("Il mouse rappresenta un organismo che percepisce il Nord magnetico invisibile.", 30, 75);
+  text("Il mouse controlla la direzione dello sguardo dell'uccello.", 30, 76);
+  text("La visualizzazione simula una bussola a inclinazione, non una bussola Nord/Sud umana.", 30, 98);
 
   fill(0, 255, 230);
-  text("vicino al Nord → ordine", 30, 110);
+  text("sguardo allineato al campo → segnale visivo più forte", 30, 132);
 
   fill(170, 80, 255);
-  text("lontano dal Nord → caos", 30, 135);
+  text("sguardo perpendicolare al campo → segnale più debole", 30, 154);
 
-  fill(255);
-  textSize(14);
-  text("NORD MAGNETICO", north.x + 22, north.y + 5);
+  let percent = int(signal * 100);
 
-  let percent = int(order * 100);
   fill(255);
   textSize(16);
-  text("allineamento campo: " + percent + "%", 30, height - 35);
+  text("intensità del segnale magnetico: " + percent + "%", 30, height - 35);
+
+  fill(255, 170);
+  textSize(13);
+  text("CENTRO DEL CAMPO VISIVO", width / 2 + 16, height / 2 - 12);
+
+  noFill();
+  stroke(255, 130);
+  circle(width / 2, height / 2, 10);
 }
 
 function windowResized() {
